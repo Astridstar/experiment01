@@ -1,40 +1,22 @@
 """
-Silver layer: Customers table with data quality checks and transformations.
-Demonstrates the silver table framework for scalable data quality management.
+Silver layer: Customers table with SCD Type 2 and data quality checks.
+Demonstrates the SCD Type 2 framework for scalable historical tracking across 400 tables.
 """
 
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 from utils.silver_builder import build_silver_table, create_standard_customer_config, extract_postal_code_and_validate
+from utils.scd_builder import create_customer_scd_config
 
 
-@dp.table(
-    name="customers_silver",
-    comment="Silver layer: Cleaned and validated customer data with quality flags"
-)
-def customers_silver():
+# Step 1: Create intermediate view with quality checks and transformations
+@dp.view(name="customers_silver_source")
+def customers_silver_source():
     """
-    Transform bronze customers into silver layer with:
-    - Data quality validations (NRIC, email, gender, country, postal code)
-    - Standardized transformations (uppercase names/NRIC/gender/country)
-    - Null handling (fill with 'None')
-    - Quality flags and scores
-    - Postal code extraction and validation
-    
-    Quality Checks Applied:
-    1. NRIC: Singapore format validation (9 alphanumeric, uppercase)
-    2. Email: Valid email format
-    3. Gender: Valid values (M, F, X) uppercase
-    4. Country: Valid nationality codes (US, GB, SG, CN, TW, FR, DK) uppercase
-    5. Postal Code: Singapore 6-digit format
-    6. Nulls: Filled with 'None' string
-    
-    Invalid values are KEPT and FLAGGED in data_quality_flags column.
-    
-    NOTE: Using @dp.table() with spark.readStream to create an actual streaming table
-    (Delta table) that supports Unity Catalog column masks for PII protection.
+    Intermediate view that applies quality checks and transformations to bronze data.
+    This view feeds into the SCD Type 2 flow.
     """
-    # Read from bronze layer using streaming
+    # Read from bronze layer (streaming)
     bronze_df = spark.readStream.table("dev.experiment01.customers_raw")
     
     # Create standard customer configuration
@@ -54,28 +36,25 @@ def customers_silver():
     # Add silver layer metadata
     silver_df = silver_df.withColumn("silver_processed_ts", F.current_timestamp())
     
-    # Select final columns in logical order
-    return silver_df.select(
-        "customer_id",
-        "full_name",
-        "email",
-        "phone",
-        "nric",
-        "dob",
-        "address",
-        "postal_code",
-        "country",
-        "gender",
-        "signup_ts",
-        "last_login_ts",
-        "status",
-        "segment",
-        "credit_score",
-        "annual_income",
-        "data_quality_flags",
-        "quality_score",
-        "is_valid_postal_code",
-        "ingested_file",
-        "ingestion_ts",
-        "silver_processed_ts"
-    )
+    return silver_df
+
+
+# Step 2 & 3: Create SCD Type 2 target and flow using config factory
+scd_config = create_customer_scd_config(table_name="customers")
+
+# Create target streaming table
+dp.create_streaming_table(
+    name=scd_config.target_name,
+    comment="Silver layer: Customer data with SCD Type 2 historical tracking and quality flags"
+)
+
+# Create Auto CDC flow with SCD Type 2
+dp.create_auto_cdc_flow(
+    target=scd_config.target_name,
+    source=scd_config.source_name,
+    keys=scd_config.keys,
+    sequence_by=scd_config.sequence_by,
+    stored_as_scd_type=2,
+    track_history_except_column_list=scd_config.track_history_except_columns,
+    ignore_null_updates=scd_config.ignore_null_updates
+)

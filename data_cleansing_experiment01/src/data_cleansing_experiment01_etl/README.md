@@ -1,10 +1,10 @@
-# Data Cleansing Pipeline - Ingestion, Silver & Gold with Dynamic PII Masking
+# Data Cleansing Pipeline - Complete Framework for 600+ Tables
 
 ## Overview
 This pipeline provides standardized frameworks for:
 * **200+ Bronze ingestions** with consistent column naming
-* **400+ Silver tables** with data quality checks and transformations
-* **Dynamic PII masking** using Unity Catalog column masks (most efficient for scale)
+* **400+ Silver tables** with SCD Type 2, data quality checks, and transformations
+* **Dynamic PII masking** using Unity Catalog column masks
 
 ---
 
@@ -13,115 +13,280 @@ This pipeline provides standardized frameworks for:
 ```
 Bronze (Streaming Tables)
     ↓
-Silver (Materialized Views) + Column Masks
+Silver Source Views (Quality Checks + Transformations)
+    ↓
+Silver Tables (SCD Type 2 with Auto CDC) + Column Masks
     ↓
 Users Query Silver Directly (Masking Applied at Query Time)
 ```
-
-**Key Benefits:**
-* ✅ **No Gold layer needed** - Users query silver tables directly
-* ✅ **Dynamic per-user masking** - Each user sees different data
-* ✅ **Query-time evaluation** - Masking based on current access level
-* ✅ **Minimal code** - 4 ALTER statements per table
-* ✅ **Centralized logic** - Masking UDFs reused across 400 tables
-* ✅ **No storage overhead** - No duplicate tables/views
-* ✅ **Optimal performance** - Native Unity Catalog feature
 
 ---
 
 ## Bronze Layer: Ingestion Templates
 
-[Previous bronze layer content remains the same...]
+### Column Naming Convention
+All ingested data follows these rules:
+* **Lowercase**: All column names converted to lowercase
+* **Trimmed**: Leading/trailing whitespace removed
+* **Underscores**: Spaces replaced with underscores
+* **Example**: `"  Customer Name  "` → `"customer_name"`
+
+### Quick Start for Bronze Ingestions
+
+```python
+from pyspark import pipelines as dp
+from pyspark.sql import functions as F
+from utils.column_utils import normalize_dataframe_columns
+
+@dp.table(name="table_name_raw")
+def table_name_raw():
+    df = (
+        spark.readStream.format("cloudFiles")
+        .option("cloudFiles.format", "csv")
+        .option("cloudFiles.inferColumnTypes", True)
+        .load("/Volumes/catalog/schema/volume/path")
+        .withColumn("ingested_file", F.col("_metadata.file_path"))
+        .withColumn("ingestion_ts", F.current_timestamp())
+    )
+    return normalize_dataframe_columns(df)
+```
 
 ---
 
-## Silver Layer: Data Quality + Column Masks
+## Silver Layer: SCD Type 2 + Data Quality Framework
 
 ### Overview
-Silver tables are **materialized views** with:
+Silver tables use **SCD Type 2** for historical tracking with:
 1. Data quality checks and transformations
-2. **Unity Catalog column masks** for dynamic PII protection
+2. Automatic versioning with `__START_AT` and `__END_AT` columns
+3. **Unity Catalog column masks** for dynamic PII protection
 
 ### Framework Components
 
-[Previous silver layer components remain the same...]
+#### 1. Validators (`utils/validators.py`)
+* `validate_singapore_postal_code()` - 6-digit format
+* `validate_singapore_nric()` - Singapore NRIC format with checksum
+* `validate_currency_code()` - USD, RMB, YEN, SGD, CNY, JPY
+* `validate_nationality_code()` - US, UK, SG, CN, TW, FR, DK
+* `validate_gender()` - M, F, X
+* `validate_email()` - Email format
+
+#### 2. Transformations (`utils/transformations.py`)
+* `standardize_singapore_postal_code()` - Pad to 6 digits
+* `standardize_nric()` - Uppercase, trimmed
+* `normalize_currency_code()` - ISO codes
+* `normalize_nationality_code()` - 2-letter ISO
+* `normalize_gender()` - Uppercase M/F/X
+* `normalize_name()` - Uppercase, trimmed
+* `standardize_phone_number()` - +65 format
+
+#### 3. Data Quality (`utils/data_quality.py`)
+* `flag_invalid_values()` - Comma-separated list of failures
+* `add_quality_score()` - Percentage of passed validations
+* `fill_nulls_with_none()` - Fill nulls with 'None'
+
+#### 4. Silver Builder (`utils/silver_builder.py`)
+* `SilverTableConfig` - Configuration class
+* `build_silver_table()` - Apply transformations and validations
+* `create_standard_customer_config()` - Pre-built patterns
+
+#### 5. SCD Type 2 Builder (`utils/scd_builder.py`)
+* `SCDType2Config` - SCD configuration class
+* **Config Factories:**
+  * `create_customer_scd_config()` - For customer tables
+  * `create_transaction_scd_config()` - For transaction tables
+  * `create_product_scd_config()` - For product tables
+  * `create_generic_scd_config()` - For any table type
+* **Query Helpers:**
+  * `query_scd_type2_current()` - Get current records only
+  * `query_scd_type2_as_of()` - Time travel queries
+  * `query_scd_type2_history()` - Full history for specific records
 
 ---
 
-## Dynamic PII Masking with Unity Catalog Column Masks
+## Creating Silver Tables with SCD Type 2
 
-### Why Column Masks (Recommended for 400 Tables)
+### Pattern for 400 Tables (50 lines per table)
 
-| Feature | Column Masks | SQL Views | Materialized Views |
-|---------|-------------|-----------|-------------------|
-| **Per-user masking** | ✅ Yes | ✅ Yes | ❌ No |
-| **Query-time evaluation** | ✅ Yes | ✅ Yes | ❌ No |
-| **Code per table** | 4 ALTER statements | ~50 lines SQL | ~100 lines Python |
-| **Performance** | ⚡ Native | 🔄 Subquery overhead | ⚡ Pre-computed |
-| **Storage overhead** | ✅ None | ✅ None | ❌ Doubles storage |
-| **Maintenance** | ✅ Centralized UDFs | ❌ 400 definitions | ❌ 400 definitions |
-| **BI tool compatible** | ✅ Yes | ✅ Yes | ✅ Yes |
+```python
+from pyspark import pipelines as dp
+from pyspark.sql import functions as F
+from utils.silver_builder import build_silver_table, create_standard_customer_config, extract_postal_code_and_validate
+from utils.scd_builder import create_customer_scd_config
+
+# Step 1: Create source view with quality checks
+@dp.view(name="table_name_silver_source")
+def table_name_silver_source():
+    bronze_df = spark.readStream.table("dev.experiment01.table_name_raw")
+    config = create_standard_customer_config()
+    silver_df = build_silver_table(bronze_df, config, add_quality_flags=True, add_quality_score=True)
+    silver_df = extract_postal_code_and_validate(silver_df, "address")
+    return silver_df.withColumn("silver_processed_ts", F.current_timestamp())
+
+# Step 2 & 3: Create SCD Type 2 using config factory
+scd_config = create_customer_scd_config(table_name="table_name")
+
+dp.create_streaming_table(name=scd_config.target_name, comment="SCD Type 2 table")
+
+dp.create_auto_cdc_flow(
+    target=scd_config.target_name,
+    source=scd_config.source_name,
+    keys=scd_config.keys,
+    sequence_by=scd_config.sequence_by,
+    stored_as_scd_type=2,
+    track_history_except_column_list=scd_config.track_history_except_columns,
+    ignore_null_updates=scd_config.ignore_null_updates
+)
+```
+
+### Config Factory Examples
+
+**Customer Tables:**
+```python
+# Standard customer table
+config = create_customer_scd_config("customers")
+
+# Custom keys
+config = create_customer_scd_config("vip_customers", keys=["vip_id"])
+
+# Track all columns including metadata
+config = create_customer_scd_config("customers", track_all_columns=True)
+```
+
+**Transaction Tables:**
+```python
+# Standard transaction table
+config = create_transaction_scd_config("orders")
+
+# Track status changes only
+config = create_transaction_scd_config("payments", track_status_only=True)
+
+# Custom keys
+config = create_transaction_scd_config("invoices", keys=["invoice_id"])
+```
+
+**Product Tables:**
+```python
+# Standard product table
+config = create_product_scd_config("products")
+
+# Don't track price changes
+config = create_product_scd_config("inventory", track_price_changes=False)
+```
+
+**Generic Tables:**
+```python
+# Full customization
+config = create_generic_scd_config(
+    table_name="employees",
+    keys=["employee_id"],
+    sequence_by="modified_ts",
+    track_history_columns=["salary", "department", "title"],
+    apply_as_deletes="is_deleted = true"
+)
+```
+
+---
+
+## SCD Type 2 Features
+
+### Automatic Columns
+
+Every SCD Type 2 table includes:
+* `__START_AT` - When this version became active (TIMESTAMP)
+* `__END_AT` - When this version became inactive (NULL = current)
+
+### History Tracking Options
+
+**Option 1: Track all columns (default)**
+```python
+stored_as_scd_type=2
+# Every column change creates a new version
+```
+
+**Option 2: Exclude metadata columns (recommended)**
+```python
+track_history_except_column_list=[
+    "ingested_file",
+    "ingestion_ts",
+    "silver_processed_ts",
+    "data_quality_flags",
+    "quality_score"
+]
+# Changes to these columns don't create new versions
+```
+
+**Option 3: Track specific columns only**
+```python
+track_history_column_list=["email", "phone", "address", "status"]
+# Only changes to these columns create new versions
+```
+
+### Querying SCD Type 2 Tables
+
+**Get current records only:**
+```python
+from utils.scd_builder import query_scd_type2_current
+
+current = query_scd_type2_current("dev.experiment01.customers_silver")
+display(current)
+```
+
+Or in SQL:
+```sql
+SELECT * FROM dev.experiment01.customers_silver
+WHERE __END_AT IS NULL;
+```
+
+**Time travel (as of specific date):**
+```python
+from utils.scd_builder import query_scd_type2_as_of
+
+historical = query_scd_type2_as_of("dev.experiment01.customers_silver", "2024-01-01")
+display(historical)
+```
+
+Or in SQL:
+```sql
+SELECT * FROM dev.experiment01.customers_silver
+WHERE __START_AT <= '2024-01-01'
+  AND (__END_AT IS NULL OR __END_AT > '2024-01-01');
+```
+
+**Full history for a specific customer:**
+```python
+from utils.scd_builder import query_scd_type2_history
+
+history = query_scd_type2_history("dev.experiment01.customers_silver", {"customer_id": 123})
+display(history)
+```
+
+Or in SQL:
+```sql
+SELECT * FROM dev.experiment01.customers_silver
+WHERE customer_id = 123
+ORDER BY __START_AT;
+```
+
+---
+
+## Dynamic PII Masking with Column Masks
 
 ### Implementation Steps
 
-#### **Step 1: Create Access Control Table**
+#### **Step 1: Create Masking UDFs (One-Time)**
 
-Run pipeline to create `dev.experiment01.pii_access_grants` table.
-
-File: `transformations/governance/access_control.py`
-
-#### **Step 2: Create Masking UDFs (One-Time)**
-
-Run this SQL script **once** in SQL Editor:
-
-File: `setup/create_masking_udfs.sql`
-
+Run `setup/create_masking_udfs.sql` in **SQL Editor with SQL Warehouse**:
 ```sql
--- Creates these functions in dev.experiment01:
--- - mask_email(email STRING)
--- - mask_phone(phone STRING)
--- - mask_nric(nric STRING)
--- - mask_address(address STRING, postal_code STRING)
--- - mask_ssn(ssn STRING)
+CREATE FUNCTION dev.experiment01.mask_email(email STRING) ...
+CREATE FUNCTION dev.experiment01.mask_phone(phone STRING) ...
+CREATE FUNCTION dev.experiment01.mask_nric(nric STRING) ...
+CREATE FUNCTION dev.experiment01.mask_address(address STRING, postal_code STRING) ...
 ```
 
-**How it works:**
-* Each function checks `pii_access_grants` table for current user
-* Returns unmasked, partially masked, or fully masked data
-* Evaluated at **query time** for each user
+#### **Step 2: Apply Column Masks to Silver Tables**
 
-#### **Step 3: Create Silver Tables**
-
-Run pipeline to create silver tables with quality checks.
-
-Example: `transformations/silver/customers_silver.py`
-
-```python
-@dp.materialized_view(name="customers_silver")
-def customers_silver():
-    config = create_standard_customer_config()
-    return build_silver_table(bronze_df, config)
-```
-
-#### **Step 4: Apply Column Masks to Silver Tables**
-
-Use the provided script to apply masks:
-
-File: `setup/apply_column_masks.py`
-
-**Option A: Generate SQL script**
-```python
-python setup/apply_column_masks.py > apply_masks.sql
-# Review and run the generated SQL
-```
-
-**Option B: Apply directly in notebook**
-```python
-from setup.apply_column_masks import apply_all_masks
-apply_all_masks(spark)
-```
-
-**Option C: Manual for single table**
+Run in **SQL Editor with SQL Warehouse**:
 ```sql
 ALTER TABLE dev.experiment01.customers_silver 
   ALTER COLUMN email SET MASK dev.experiment01.mask_email;
@@ -136,12 +301,7 @@ ALTER TABLE dev.experiment01.customers_silver
   ALTER COLUMN address SET MASK dev.experiment01.mask_address USING COLUMNS (postal_code);
 ```
 
-#### **Step 5: Users Query Silver Tables**
-
-```sql
--- Each user sees different data based on their access level
-SELECT * FROM dev.experiment01.customers_silver LIMIT 10;
-```
+**Important:** Column masks must be applied via **SQL Warehouse**, not interactive/assigned clusters.
 
 ### PII Masking Rules
 
@@ -154,99 +314,102 @@ SELECT * FROM dev.experiment01.customers_silver LIMIT 10;
 * **Email**: `user@domain.com` → `u***@domain.com` (partial) or `***@***` (full)
 * **Phone**: `+65 12345678` → `+65 ****5678` (partial) or `***` (full)
 * **NRIC**: `S1234567D` → `S****567D` (partial) or `***` (full)
-* **Address**: Full address → `*** Singapore 123456` (partial) or `***` (full)
-* **SSN**: `123-45-6789` → `***-**-6789` (partial) or `***` (full)
+* **Address**: Full → `*** Singapore 123456` (partial) or `***` (full)
 
-### Temporal Access Control
+---
 
-**Managed via Databricks App:**
-1. User requests access (partial/full)
-2. Manager/governance officer approves
-3. Access grant inserted into `pii_access_grants` table
-4. User queries silver table → sees unmasked data
-5. Access expires automatically
-6. User queries again → sees masked data
+## Scaling to 400 Tables
 
-**Access Grant Schema:**
+### Minimal Code Per Table
+
+**For Customer-like tables (50 lines):**
 ```python
-- user_email: User's email
-- user_group: Role (analyst, scientist, engineer, manager, governance_officer)
-- access_level: full_access, partial_access, masked_only
-- granted_by: Approver
-- granted_at: Start time
-- expires_at: End time (NULL = permanent)
-- is_active: Currently active?
-- reason: Business justification
-- approval_ticket_id: Workflow reference
+from utils.scd_builder import create_customer_scd_config
+
+@dp.view(name="table_name_silver_source")
+def table_name_silver_source():
+    bronze_df = spark.readStream.table("dev.experiment01.table_name_raw")
+    config = create_standard_customer_config()
+    return build_silver_table(bronze_df, config).withColumn("silver_processed_ts", F.current_timestamp())
+
+scd_config = create_customer_scd_config("table_name")
+dp.create_streaming_table(name=scd_config.target_name)
+dp.create_auto_cdc_flow(
+    target=scd_config.target_name,
+    source=scd_config.source_name,
+    keys=scd_config.keys,
+    sequence_by=scd_config.sequence_by,
+    stored_as_scd_type=2,
+    track_history_except_column_list=scd_config.track_history_except_columns,
+    ignore_null_updates=scd_config.ignore_null_updates
+)
 ```
 
-### Scaling to 400 Tables
+**For Transaction tables:**
+```python
+from utils.scd_builder import create_transaction_scd_config
 
-**For each silver table:**
+scd_config = create_transaction_scd_config("orders")
+# ... same pattern as above
+```
 
-1. **Create silver table** (materialized view with quality checks)
-   ```python
-   @dp.materialized_view(name="table_name_silver")
-   def table_name_silver():
-       config = create_standard_customer_config()
-       return build_silver_table(bronze_df, config)
-   ```
+**For Product tables:**
+```python
+from utils.scd_builder import create_product_scd_config
 
-2. **Apply column masks** (4 ALTER statements)
-   ```sql
-   ALTER TABLE dev.experiment01.table_name_silver 
-     ALTER COLUMN email SET MASK dev.experiment01.mask_email;
-   
-   ALTER TABLE dev.experiment01.table_name_silver 
-     ALTER COLUMN phone SET MASK dev.experiment01.mask_phone;
-   
-   ALTER TABLE dev.experiment01.table_name_silver 
-     ALTER COLUMN nric SET MASK dev.experiment01.mask_nric;
-   
-   ALTER TABLE dev.experiment01.table_name_silver 
-     ALTER COLUMN address SET MASK dev.experiment01.mask_address USING COLUMNS (postal_code);
-   ```
+scd_config = create_product_scd_config("products")
+# ... same pattern as above
+```
 
-3. **Done!** Users query the silver table directly.
+**For Custom tables:**
+```python
+from utils.scd_builder import create_generic_scd_config
 
-**Total effort per table:**
-* ~15 lines Python (silver table)
-* 4 ALTER statements (column masks)
-* **No gold layer needed**
+scd_config = create_generic_scd_config(
+    table_name="employees",
+    keys=["employee_id"],
+    sequence_by="modified_ts",
+    track_history_columns=["salary", "department"]
+)
+# ... same pattern as above
+```
 
-### Performance Considerations
-
-**Column Mask Performance:**
-* Masking functions are evaluated **once per query** (not per row)
-* Access grants table lookup is cached
-* Minimal overhead compared to views with subqueries
-* Native Unity Catalog feature optimized by Databricks
-
-**Best Practices:**
-* Keep `pii_access_grants` table small (only active grants)
-* Add index on `user_email` column
-* Regularly purge expired grants
-* Monitor query performance
-
-### Removing Column Masks
-
-If needed, remove masks from a table:
+### Apply Column Masks (4 lines per table)
 
 ```sql
--- Remove mask from a column
-ALTER TABLE dev.experiment01.customers_silver 
-  ALTER COLUMN email DROP MASK;
-
--- Remove all masks from a table
-ALTER TABLE dev.experiment01.customers_silver 
-  ALTER COLUMN email DROP MASK;
-ALTER TABLE dev.experiment01.customers_silver 
-  ALTER COLUMN phone DROP MASK;
-ALTER TABLE dev.experiment01.customers_silver 
-  ALTER COLUMN nric DROP MASK;
-ALTER TABLE dev.experiment01.customers_silver 
-  ALTER COLUMN address DROP MASK;
+ALTER TABLE dev.experiment01.table_name_silver ALTER COLUMN email SET MASK dev.experiment01.mask_email;
+ALTER TABLE dev.experiment01.table_name_silver ALTER COLUMN phone SET MASK dev.experiment01.mask_phone;
+ALTER TABLE dev.experiment01.table_name_silver ALTER COLUMN nric SET MASK dev.experiment01.mask_nric;
+ALTER TABLE dev.experiment01.table_name_silver ALTER COLUMN address SET MASK dev.experiment01.mask_address USING COLUMNS (postal_code);
 ```
+
+---
+
+## Complete Implementation Summary
+
+### Total Effort for 400 Tables
+
+**One-time setup:**
+* 5 masking UDFs (30 minutes)
+* 4 config factory functions (already done)
+* 1 access grants table (already done)
+
+**Per table:**
+* ~50 lines Python (silver table with SCD Type 2)
+* 4 ALTER statements (column masks)
+
+**Total: ~54 lines per table** vs 200+ without framework
+
+### Benefits
+
+✅ **SCD Type 2** - Automatic historical tracking  
+✅ **Time travel** - Query data at any point in time  
+✅ **Data quality** - Integrated validation and flagging  
+✅ **PII masking** - Dynamic per-user at query time  
+✅ **Temporal access** - Auto-expiring permissions  
+✅ **Minimal code** - Config factories reduce boilerplate  
+✅ **Centralized logic** - Update once, applies everywhere  
+✅ **Audit trail** - Full history + access logs  
 
 ---
 
@@ -259,15 +422,18 @@ pipeline_root/
 │   ├── validators.py            # Validation functions
 │   ├── transformations.py       # Transformation functions
 │   ├── data_quality.py          # Quality tracking
-│   └── silver_builder.py        # Silver table framework
+│   ├── silver_builder.py        # Silver table framework
+│   ├── scd_builder.py           # SCD Type 2 framework + config factories
+│   └── pii_masking.py           # PII masking utilities
 ├── setup/
-│   ├── create_masking_udfs.sql  # Masking UDFs (run once)
-│   └── apply_column_masks.py    # Script to apply masks to 400 tables
+│   ├── create_masking_udfs.sql  # Masking UDFs (run once in SQL Editor)
+│   └── apply_column_masks.py    # Generate ALTER statements
 ├── transformations/
 │   ├── bronze/
 │   │   └── ... (200+ files)
 │   ├── silver/
-│   │   └── ... (400+ files - materialized views with column masks)
+│   │   ├── customers_silver.py  # Example with SCD Type 2
+│   │   └── ... (400+ files)
 │   └── governance/
 │       └── access_control.py    # Access grants table
 └── tests/
@@ -276,60 +442,87 @@ pipeline_root/
 
 ---
 
-## Testing Workflow
+## Complete Workflow
 
-1. **Create pipeline layers:**
-   - Bronze: Ingest raw data
-   - Silver: Apply quality checks
-   - Governance: Create access grants table
+### 1. Create Bronze Tables
+```python
+@dp.table(name="customers_raw")
+def customers_raw():
+    return spark.readStream.format("cloudFiles")...
+```
 
-2. **Run pipeline update:**
-   - Materializes bronze and silver tables
+### 2. Create Silver Tables with SCD Type 2
+```python
+# Source view with quality checks
+@dp.view(name="customers_silver_source")
+def customers_silver_source():
+    return build_silver_table(bronze_df, config)
 
-3. **Create masking UDFs:**
-   - Run `setup/create_masking_udfs.sql` in SQL Editor
+# SCD Type 2 flow
+scd_config = create_customer_scd_config("customers")
+dp.create_streaming_table(name=scd_config.target_name)
+dp.create_auto_cdc_flow(...scd_config parameters...)
+```
 
-4. **Apply column masks:**
-   - Run `setup/apply_column_masks.py` or manual ALTER statements
+### 3. Run Pipeline
+```bash
+# Creates bronze and silver tables with SCD Type 2
+databricks pipelines update --pipeline-id <pipeline-id>
+```
 
-5. **Test access control:**
-   - Query as different users
-   - Verify masking levels
-   - Test temporal expiration
+### 4. Create Masking UDFs (One-Time)
+```sql
+-- Run in SQL Editor with SQL Warehouse
+CREATE FUNCTION dev.experiment01.mask_email(email STRING) ...
+```
 
-6. **Test approval workflow:**
-   - Submit access request via App
-   - Approve request
-   - Verify unmasked access
-   - Wait for expiration
-   - Verify masking restored
+### 5. Apply Column Masks
+```sql
+-- Run in SQL Editor with SQL Warehouse
+ALTER TABLE dev.experiment01.customers_silver ALTER COLUMN email SET MASK dev.experiment01.mask_email;
+```
+
+### 6. Query with Dynamic Masking
+```sql
+-- Each user sees different data based on access level
+SELECT * FROM dev.experiment01.customers_silver WHERE __END_AT IS NULL;
+```
 
 ---
 
-## Summary: Why Column Masks Win
+## Example: Complete Customer Pipeline
 
-**For 400 tables with 500 users:**
+**Files:**
+* Bronze: `transformations/bronze/customers_bronze.py`
+* Silver: `transformations/silver/customers_silver.py` (with SCD Type 2)
+* Access Control: `transformations/governance/access_control.py`
+* Masking UDFs: `setup/create_masking_udfs.sql`
 
-✅ **Minimal code** - 4 ALTER statements per table  
-✅ **Centralized logic** - 5 UDFs reused everywhere  
-✅ **Query-time masking** - Dynamic per user  
-✅ **No storage overhead** - No duplicate tables  
-✅ **Native performance** - Built into Databricks  
-✅ **Easy maintenance** - Update UDF once, applies to all tables  
-✅ **BI tool compatible** - Works with Tableau, Power BI, etc.  
-✅ **Temporal access** - Automatic expiration enforcement  
+**Query Examples:**
+```sql
+-- Current customers only
+SELECT * FROM dev.experiment01.customers_silver WHERE __END_AT IS NULL;
 
-**Total implementation:**
-* 5 masking UDFs (one-time)
-* 400 silver tables (~15 lines each)
-* 1,600 ALTER statements (4 per table, scripted)
-* 1 access grants table
-* 1 Databricks App for access management
+-- Customer history
+SELECT * FROM dev.experiment01.customers_silver WHERE customer_id = 123 ORDER BY __START_AT;
 
-**vs. SQL Views approach:**
-* 400 silver tables
-* 400 gold views (~50 lines each = 20,000 lines)
-* Subquery overhead on every query
-* Harder to maintain
+-- Customers as of Jan 1, 2024
+SELECT * FROM dev.experiment01.customers_silver 
+WHERE __START_AT <= '2024-01-01' AND (__END_AT IS NULL OR __END_AT > '2024-01-01');
+```
 
-**Column masks are the clear winner for scale!** 🏆
+---
+
+## Key Advantages
+
+| Feature | Your Framework | Without Framework |
+|---------|---------------|-------------------|
+| **Code per table** | 50 lines | 200+ lines |
+| **SCD Type 2** | ✅ Automatic | ❌ Manual versioning |
+| **Data quality** | ✅ Integrated | ❌ Separate code |
+| **PII masking** | ✅ Dynamic per-user | ❌ Static or complex |
+| **Time travel** | ✅ Built-in | ❌ Manual implementation |
+| **Maintenance** | ✅ Update utilities once | ❌ Update 400 files |
+| **Total code for 400 tables** | 20,000 lines | 80,000+ lines |
+
+**You've reduced code by 75% while adding more features!** 🎉
