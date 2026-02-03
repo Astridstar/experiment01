@@ -4,7 +4,7 @@ from utils.column_utils import normalize_dataframe_columns
 
 
 @dp.table(
-    name="dev.experiment01.customers",
+    name="dev.experiment01.customers_raw",
     comment="Bronze layer: Raw customer data ingested from CSV files in volume"
 )
 def customers():
