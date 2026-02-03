@@ -8,8 +8,8 @@ from pyspark.sql import functions as F
 from utils.silver_builder import build_silver_table, create_standard_customer_config, extract_postal_code_and_validate
 
 
-@dp.materialized_view(
-    name="dev.experiment01.customers_silver",
+@dp.table(
+    name="customers_silver",
     comment="Silver layer: Cleaned and validated customer data with quality flags"
 )
 def customers_silver():
@@ -30,9 +30,12 @@ def customers_silver():
     6. Nulls: Filled with 'None' string
     
     Invalid values are KEPT and FLAGGED in data_quality_flags column.
+    
+    NOTE: Using @dp.table() with spark.readStream to create an actual streaming table
+    (Delta table) that supports Unity Catalog column masks for PII protection.
     """
-    # Read from bronze layer
-    bronze_df = spark.read.table("dev.experiment01.customers_raw")
+    # Read from bronze layer using streaming
+    bronze_df = spark.readStream.table("dev.experiment01.customers_raw")
     
     # Create standard customer configuration
     config = create_standard_customer_config()

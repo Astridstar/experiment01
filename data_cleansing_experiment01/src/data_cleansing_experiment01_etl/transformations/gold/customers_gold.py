@@ -1,5 +1,5 @@
 """
-Gold layer: Customers view with dynamic PII masking based on user access.
+Gold layer: Customers materialized view with dynamic PII masking based on user access.
 Demonstrates temporal access control for 500 users across 400 tables.
 """
 
@@ -8,13 +8,13 @@ from pyspark.sql import functions as F
 from utils.pii_masking import mask_email, mask_phone, mask_nric, mask_address
 
 
-@dp.view(
+@dp.materialized_view(
     name="customers_gold",
     comment="Gold layer: Customer data with dynamic PII masking based on temporal access grants"
 )
 def customers_gold():
     """
-    Dynamic view that masks PII based on current user's access level.
+    Materialized view that masks PII based on current user's access level at refresh time.
     
     Access Levels:
     - full_access: All PII visible (governance_officers, approved requests)
@@ -29,6 +29,10 @@ def customers_gold():
     - SSN: Mask all but last 4 (***-**-6789) or full (***)
     
     Access is temporal and managed via Databricks App approval workflow.
+    
+    NOTE: Masking is applied at PIPELINE REFRESH TIME based on the pipeline owner's access level.
+    All users will see the same masked data. For true per-user dynamic masking, query the
+    SQL view 'customers_gold_uc' instead.
     """
     
     # Read silver layer
@@ -37,7 +41,7 @@ def customers_gold():
     # Read access grants table
     access_grants = spark.read.table("dev.experiment01.pii_access_grants")
     
-    # Get current user
+    # Get current user (pipeline owner at refresh time)
     current_user = F.current_user()
     
     # Filter active grants for current user
