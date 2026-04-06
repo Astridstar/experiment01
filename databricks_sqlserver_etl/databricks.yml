@@ -1,0 +1,48 @@
+# Databricks Asset Bundle for SQL Server Lakeflow Connect ETL Pipeline
+# Uses Databricks SDP (Secure Data Platform) with Unity Catalog connections.
+
+bundle:
+  name: sqlserver_lakeflow_etl
+
+include:
+  - resources/*.yml
+  - resources/*/*.yml
+
+variables:
+  catalog:
+    description: The Unity Catalog catalog for pipeline output tables
+  schema:
+    description: The schema (database) within the catalog
+  sqlserver_connection:
+    description: The Unity Catalog connection name for MS SQL Server
+    default: sqlserver_conn
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-88571bfd-8566.cloud.databricks.com
+    variables:
+      catalog: dev
+      schema: ${workspace.current_user.short_name}
+
+  staging:
+    mode: development
+    workspace:
+      host: https://dbc-88571bfd-8566.cloud.databricks.com
+    variables:
+      catalog: staging
+      schema: sqlserver_etl
+
+  prod:
+    mode: production
+    workspace:
+      host: https://dbc-88571bfd-8566.cloud.databricks.com
+      root_path: /Workspace/Users/pandawss@hotmail.com/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: prod
+      schema: sqlserver_etl
+    permissions:
+      - user_name: pandawss@hotmail.com
+        level: CAN_MANAGE

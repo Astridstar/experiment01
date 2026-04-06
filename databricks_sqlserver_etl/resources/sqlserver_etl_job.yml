@@ -1,0 +1,27 @@
+# Orchestration job for the SQL Server Lakeflow Connect ETL pipeline.
+# Runs the pipeline on a schedule with monitoring and alerting.
+
+resources:
+  jobs:
+    sqlserver_etl_job:
+      name: sqlserver_lakeflow_etl_job
+      description: "Orchestrates the SQL Server Lakeflow Connect ETL pipeline (Bronze -> Silver -> Gold)"
+
+      schedule:
+        quartz_cron_expression: "0 0 */2 * * ?"  # Every 2 hours
+        timezone_id: "Asia/Singapore"
+
+      tasks:
+        - task_key: run_etl_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.sqlserver_lakeflow_etl.id}
+            full_refresh: false
+
+      email_notifications:
+        on_failure:
+          - pandawss@hotmail.com
+
+      tags:
+        project: sqlserver_lakeflow_etl
+        layer: full_pipeline
+        source: mssql

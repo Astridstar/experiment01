@@ -1,0 +1,40 @@
+# Lakeflow Connect ETL Pipeline: MS SQL Server -> Delta Lake
+#
+# This pipeline uses Databricks Lakeflow Connect with Unity Catalog
+# connections (SDP) to securely replicate SQL Server tables and
+# transform them through Bronze -> Silver -> Gold medallion layers.
+
+resources:
+  pipelines:
+    sqlserver_lakeflow_etl:
+      name: sqlserver_lakeflow_etl
+      catalog: ${var.catalog}
+      schema: ${var.schema}
+      serverless: true
+      root_path: "../src/sqlserver_lakeflow_etl"
+      channel: PREVIEW
+
+      # Lakeflow Connect gateway configuration
+      gateway_definition:
+        connection_name: ${var.sqlserver_connection}
+        gateway_storage_catalog: ${var.catalog}
+        gateway_storage_schema: ${var.schema}
+
+      libraries:
+        - glob:
+            include: ../src/sqlserver_lakeflow_etl/transformations/**
+
+      environment:
+        dependencies:
+          - --editable ${workspace.file_path}
+
+      configuration:
+        # Pipeline-level Spark configuration
+        spark.sql.shuffle.partitions: "auto"
+        pipelines.trigger.interval: "1 hour"
+
+      continuous: false
+
+      notifications:
+        - on_failure:
+            - pandawss@hotmail.com

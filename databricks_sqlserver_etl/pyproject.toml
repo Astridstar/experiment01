@@ -1,0 +1,18 @@
+[project]
+name = "sqlserver_lakeflow_etl"
+version = "0.1.0"
+description = "Databricks Lakeflow Connect ETL pipeline for MS SQL Server ingestion using SDP"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "chispa",
+]
+
+[build-system]
+requires = ["setuptools>=67.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
