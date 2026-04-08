@@ -1,0 +1,29 @@
+[project]
+name = "shuffle_demo"
+version = "0.0.1"
+authors = [{ name = "pandawss@hotmail.com" }]
+requires-python = ">=3.10,<3.13"
+dependencies = []
+
+[project.scripts]
+# Entry point for the dataset generator Wheel task
+generate-dataset = "shuffle_demo.generate_dataset:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+    "databricks-dlt",
+    "databricks-connect>=15.4,<15.5",
+    "ipykernel",
+]
+
+[tool.ruff]
+line-length = 120

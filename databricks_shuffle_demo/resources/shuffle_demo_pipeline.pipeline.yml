@@ -1,0 +1,38 @@
+# DLT Pipeline: Shuffle Demo
+# Bronze → Silver → Gold using batch materialized views.
+# All shuffle operations (joins, groupBy, window, repartition) are visible
+# as Exchange nodes in the Spark UI SQL DAG.
+
+resources:
+  pipelines:
+    shuffle_demo_pipeline:
+      name: databricks_shuffle_demo_pipeline
+      catalog: ${var.catalog}
+      schema: ${var.schema}
+      serverless: true
+      root_path: "../src/shuffle_demo"
+
+      # Pipeline-level Spark configuration.
+      # spark.sql.shuffle.partitions controls the number of output partitions
+      # for every shuffle stage (joins, groupBy, window functions).
+      # Tune this value based on cluster size and data volume:
+      #   - Too low  → large partitions, potential executor OOM / data skew
+      #   - Too high → many tiny tasks, excessive scheduling overhead
+      configuration:
+        catalog: ${var.catalog}
+        schema: ${var.schema}
+        spark.sql.shuffle.partitions: "200"
+        # Adaptive Query Execution (AQE) dynamically coalesces shuffle partitions
+        # at runtime. Disable here so shuffle partition counts are fixed and
+        # clearly observable in the Spark UI for demo purposes.
+        spark.sql.adaptive.enabled: "false"
+        spark.databricks.delta.optimizeWrite.enabled: "true"
+        spark.databricks.delta.autoCompact.enabled: "true"
+
+      libraries:
+        - glob:
+            include: ../src/shuffle_demo/transformations/**
+
+      environment:
+        dependencies:
+          - --editable ${workspace.file_path}

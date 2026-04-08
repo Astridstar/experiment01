@@ -1,0 +1,70 @@
+# Job: Shuffle Demo
+#
+# Two-task workflow:
+#   Task 1 — generate_dataset   : Python wheel task that writes 3 partitioned Delta tables
+#   Task 2 — run_etl_pipeline   : DLT pipeline (depends on Task 1)
+#
+# The DLT pipeline executes the full bronze → silver → gold chain, surfacing
+# sort-merge joins, groupBy aggregations, and window function shuffles.
+#
+# Run manually:
+#   databricks bundle run shuffle_demo_job --param num_transactions=2000000 -t dev
+
+resources:
+  jobs:
+    shuffle_demo_job:
+      name: databricks_shuffle_demo_job
+      description: >
+        E-commerce ETL demonstrating Databricks shuffle mechanics and
+        multi-partition reads/writes across bronze, silver, and gold layers.
+
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        # Scale data volume to suit available cluster capacity.
+        # Minimum recommended: 500_000 transactions to generate visible shuffle.
+        - name: num_transactions
+          default: "2000000"
+        - name: num_customers
+          default: "200000"
+        - name: num_products
+          default: "5000"
+
+      tasks:
+        # ── Task 1: Generate synthetic dataset ───────────────────────────────
+        - task_key: generate_dataset
+          description: >
+            Generates 3 partitioned Delta tables (transactions, customers, products).
+            Transactions partitioned by (region, txn_month) → 60 partition directories.
+            Customers partitioned by region → 5 partition directories.
+            Products partitioned by category → 8 partition directories.
+          python_wheel_task:
+            package_name: shuffle_demo
+            entry_point: generate-dataset
+            named_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+              num-transactions: "{{job.parameters.num_transactions}}"
+              num-customers: "{{job.parameters.num_customers}}"
+              num-products: "{{job.parameters.num_products}}"
+          environment_key: default
+
+        # ── Task 2: Run DLT pipeline ──────────────────────────────────────────
+        - task_key: run_etl_pipeline
+          description: >
+            DLT pipeline: bronze (multi-partition reads) →
+            silver (sort-merge join shuffle) →
+            gold (groupBy + window function shuffle).
+          depends_on:
+            - task_key: generate_dataset
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.shuffle_demo_pipeline.id}
+
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "4"
+            dependencies:
+              - --editable ${workspace.file_path}

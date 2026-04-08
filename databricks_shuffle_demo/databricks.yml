@@ -1,0 +1,42 @@
+# Databricks Asset Bundle: Shuffle Demo
+# Demonstrates Spark shuffle mechanics and multi-partition I/O on Databricks.
+#
+# Deploy:  databricks bundle deploy -t dev
+# Run:     databricks bundle run shuffle_demo_job -t dev
+
+bundle:
+  name: databricks_shuffle_demo
+  uuid: a7b3c912-4d8e-4f2a-b5c1-9e0d7f8a2b4c
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog name
+    default: dev
+  schema:
+    description: Schema / database that holds all demo tables
+    default: shuffle_demo
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-88571bfd-8566.cloud.databricks.com
+    variables:
+      catalog: dev
+      schema: ${workspace.current_user.short_name}_shuffle_demo
+
+  prod:
+    mode: production
+    workspace:
+      host: https://dbc-88571bfd-8566.cloud.databricks.com
+      root_path: /Workspace/Users/pandawss@hotmail.com/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: dev
+      schema: shuffle_demo_prod
+    permissions:
+      - user_name: pandawss@hotmail.com
+        level: CAN_MANAGE
