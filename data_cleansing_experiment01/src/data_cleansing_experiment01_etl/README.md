@@ -1,5 +1,10 @@
 # Data Cleansing Pipeline - Complete Framework for 600+ Tables
 
+> **Looking for the CLV / RFM sample and its pytester tests?**
+> See [`transformations/gold/README.md`](transformations/gold/README.md) for a
+> step-by-step walkthrough, local setup instructions, and how to run the
+> `databricks-labs-pytester` tests with or without a Databricks account.
+
 ## Overview
 This pipeline provides standardized frameworks for:
 * **200+ Bronze ingestions** with consistent column naming
