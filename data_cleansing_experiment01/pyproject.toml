@@ -17,8 +17,15 @@ dev = [
     "ruff",
     "databricks-dlt",
     "databricks-connect>=15.4,<15.5",
+    "databricks-labs-pytester>=0.7",
     "ipykernel",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: tests that require a live Databricks workspace (DATABRICKS_HOST or ~/.databrickscfg).",
+]
+testpaths = ["src/data_cleansing_experiment01_etl/tests"]
 
 [project.scripts]
 main = "data_cleansing_experiment01.main:main"
